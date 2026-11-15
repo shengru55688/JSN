@@ -99,7 +99,7 @@ The workflow runs every Monday at 08:00 Taiwan time and supports manual runs. Gi
 Add these repository secrets and variables before enabling the workflow:
 
 - Secrets `GMAIL_ADDRESS` and `GMAIL_APP_PASSWORD` for Gmail IMAP.
-- Secret `JSN_SETTINGS_YAML` containing the full YAML content of your private settings; set `database.path` to `/tmp/jsn/jobs.sqlite3` for the Actions runner.
+- Secret `JSN_SETTINGS_YAML` containing the full YAML content of your private settings. The workflow overrides `database.path` with its shared `JSN_DATABASE_PATH` so the application and R2 steps use the same database.
 - Secrets `R2_ACCESS_KEY_ID` and `R2_SECRET_ACCESS_KEY` for an R2 S3 API token with access to the state object.
 - Variables `R2_ACCOUNT_ID`, `R2_BUCKET_NAME`, and `R2_OBJECT_KEY` (for example, `jsn/jobs.sqlite3`).
 - Secret `LLM_API_KEY` and variable `LLM_MODEL` for the selected LLM provider and model. For Google AI Studio, use a Google AI Studio API key and choose `provider: google_ai_studio` in the private settings file.
@@ -109,7 +109,7 @@ Add these repository secrets and variables before enabling the workflow:
 
 For Google AI Studio, `llm.min_request_interval_seconds` sets the minimum time between request starts. It defaults to 5 seconds (about 12 requests per minute) to stay below a 15 requests-per-minute free-tier limit. A Google `429` response is retried using Google's suggested wait time when available. Both supported providers retry a `503` response once after waiting for `llm.min_request_interval_seconds`. Requests from other apps using the same API key still count toward the same quota.
 
-The SQLite database stores processed email IDs, deduplicated listings, scores, and posted report weeks. GitHub Actions restores it from a private Cloudflare R2 object to `/tmp/jsn/jobs.sqlite3` before running JSN, then uploads it back after the run, including when the collection step fails. The workflow does not commit the database to the repository. For local runs, set `database.path` in your private settings to an absolute path outside the checkout if you also want the local database outside the repository.
+The SQLite database stores processed email IDs, deduplicated listings, scores, and posted report weeks. GitHub Actions restores it from a private Cloudflare R2 object to `/tmp/jsn/jobs.sqlite3` before running JSN, then uploads it back after the run, including when the collection step fails. The upload step reports whether a database was found and uploaded. The workflow does not commit the database to the repository. For local runs, set `database.path` in your private settings to an absolute path outside the checkout if you also want the local database outside the repository; `JSN_DATABASE_PATH` can override that setting when needed.
 
 ## Discord report behavior
 

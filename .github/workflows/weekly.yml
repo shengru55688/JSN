@@ -16,6 +16,8 @@ permissions:
 jobs:
   collect-and-notify:
     runs-on: ubuntu-latest
+    env:
+      JSN_DATABASE_PATH: /tmp/jsn/jobs.sqlite3
     steps:
       - name: Check out repository
         id: checkout
@@ -46,7 +48,7 @@ jobs:
           : "${R2_OBJECT_KEY:?Missing repository variable R2_OBJECT_KEY}"
           : "${AWS_ACCESS_KEY_ID:?Missing secret R2_ACCESS_KEY_ID}"
           : "${AWS_SECRET_ACCESS_KEY:?Missing secret R2_SECRET_ACCESS_KEY}"
-          mkdir -p /tmp/jsn
+          mkdir -p "$(dirname "$JSN_DATABASE_PATH")"
           endpoint="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
           error_file="${RUNNER_TEMP}/r2-head-object.err"
           if aws s3api head-object \
@@ -56,7 +58,7 @@ jobs:
             >/dev/null 2>"$error_file"; then
             aws s3 cp \
               "s3://${R2_BUCKET_NAME}/${R2_OBJECT_KEY}" \
-              /tmp/jsn/jobs.sqlite3 \
+              "$JSN_DATABASE_PATH" \
               --endpoint-url "$endpoint" \
               --only-show-errors
           elif grep -Eq '404|Not Found|NoSuchKey' "$error_file"; then
@@ -102,13 +104,17 @@ jobs:
           R2_BUCKET_NAME: ${{ vars.R2_BUCKET_NAME }}
           R2_OBJECT_KEY: ${{ vars.R2_OBJECT_KEY }}
         run: |
-          if [ -f /tmp/jsn/jobs.sqlite3 ]; then
+          if [ -f "$JSN_DATABASE_PATH" ]; then
             endpoint="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
+            echo "Uploading SQLite state to the configured R2 object."
             aws s3 cp \
-              /tmp/jsn/jobs.sqlite3 \
+              "$JSN_DATABASE_PATH" \
               "s3://${R2_BUCKET_NAME}/${R2_OBJECT_KEY}" \
               --endpoint-url "$endpoint" \
               --only-show-errors
+            echo "SQLite state uploaded successfully."
+          else
+            echo "::warning::SQLite state was not found at $JSN_DATABASE_PATH; no R2 upload was made."
           fi
 
   notify-failure:
