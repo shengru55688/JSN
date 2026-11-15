@@ -28,4 +28,10 @@ def load_config() -> dict[str, Any]:
     if not isinstance(config.get("job_details", {}), dict):
         raise ValueError("Configuration job_details must be a mapping")
 
+    database_path = os.getenv("JSN_DATABASE_PATH")
+    if database_path is not None:
+        if not database_path.strip():
+            raise ValueError("JSN_DATABASE_PATH must not be empty")
+        config["database"]["path"] = database_path
+
     return config

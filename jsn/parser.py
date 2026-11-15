@@ -98,6 +98,9 @@ def _candidate_for(
     if company in lines:
         lines.remove(company)
 
+    if lines and "·" in lines[0]:
+        # LinkedIn alert cards may prefix the location with the company name.
+        lines[0] = _clean_text(lines[0].split("·", 1)[1])
     location = lines[0] if lines else ""
     card_text = "\n".join(lines)
     source_text = (

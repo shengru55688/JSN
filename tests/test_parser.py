@@ -25,3 +25,17 @@ def test_parse_linkedin_job_card_fields_and_original_url() -> None:
     assert job.company == "Example Co."
     assert job.location == "Taipei, Taiwan"
     assert job.original_url == "https://www.linkedin.com/jobs/view/123456/"
+
+
+def test_parse_location_with_company_prefix() -> None:
+    message = GmailMessage(
+        message_id="message-1",
+        internal_date="2026-10-17T00:00:00+00:00",
+        subject="Jobs",
+        body=(
+            '<div><a href="https://www.linkedin.com/jobs/view/123456/">Engineer</a>'
+            '<a href="https://www.linkedin.com/company/example/">Example Co.</a>'
+            '<span>Example Co. · Taipei, Taiwan</span></div>'
+        ),
+    )
+    assert parse_linkedin_alert(message)[0].location == "Taipei, Taiwan"
