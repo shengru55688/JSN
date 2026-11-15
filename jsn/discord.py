@@ -5,11 +5,13 @@ import os
 import re
 from datetime import datetime, timezone
 from typing import Any
+from urllib.parse import quote
 
 import httpx
 
 
 MAX_MESSAGE_LENGTH = 1800
+SUPPRESS_EMBEDS_FLAG = 4
 UNKNOWN = "未提供"
 LOCATION_LABELS = {
     "confirmed_taiwan": "確認在台灣",
@@ -27,27 +29,48 @@ def _safe(value: Any, limit: int = 500) -> str:
     return text[:limit] or UNKNOWN
 
 
+def _format_summary(value: Any) -> str:
+    if not isinstance(value, list):
+        return _safe(value, MAX_MESSAGE_LENGTH - 50)
+
+    items = [
+        _safe(item, MAX_MESSAGE_LENGTH - 50)
+        for item in value
+        if isinstance(item, str) and item.strip() and item.strip() != UNKNOWN
+    ]
+    if not items:
+        return UNKNOWN
+    return "\n" + "\n".join(f"  - {item}" for item in items)
+
+
 def _job_block(job: dict[str, Any]) -> str:
     analysis = job["analysis"]
     fields = analysis["fields"]
     decision = "符合" if analysis["decision"] == "pass" else "待確認"
-    location_status = LOCATION_LABELS.get(analysis["location_status"], "待確認")
+    raw_location_status = analysis["location_status"]
+    location_label = LOCATION_LABELS.get(raw_location_status, "待確認")
+    location_annotation = (
+        "" if raw_location_status == "confirmed_taiwan" else f"（{location_label}）"
+    )
     schedule_status = SCHEDULE_LABELS.get(analysis["schedule_status"], "待確認")
     work_mode_status = WORK_MODE_LABELS.get(analysis["work_mode_status"], "待確認")
     skills = "、".join(analysis["matched_skills"]) or UNKNOWN
+    original_url = quote(
+        str(job["original_url"]).strip(), safe=":/?&=%#[]@!$'*,;+"
+    )
     return "\n".join(
         (
             f"## {_safe(job['title'], 160)}｜{_safe(job['company'], 120)}",
             f"- 評估：{decision}｜匹配分數：{analysis['score']}/100",
-            f"- 地點：{_safe(job['location'], 200)}（{location_status}）",
+            f"- 地點：{_safe(job['location'], 200)}{location_annotation}",
             f"- 工作時間：{_safe(fields.get('schedule'))}（{schedule_status}）",
             f"- WFH／工作型態：{_safe(fields.get('work_mode'))}（{work_mode_status}）",
             f"- 符合技能：{skills}",
-            f"- 工作內容：{_safe(fields.get('responsibilities'))}",
-            f"- 工作要求：{_safe(fields.get('requirements'))}",
+            f"- 工作內容：{_format_summary(fields.get('responsibilities'))}",
+            f"- 工作要求：{_format_summary(fields.get('requirements'))}",
             f"- 福利：{_safe(fields.get('benefits'))}",
             f"- 判斷摘要：{_safe(analysis['rationale'], 300)}",
-            f"- 原始職缺：<{job['original_url']}>",
+            f"- [原始職缺]({original_url})",
         )
     )
 
@@ -77,20 +100,24 @@ def _post_forum_thread(
     thread_name: str,
     content: str,
     replies: list[str] | None = None,
+    suppress_embeds: bool = False,
 ) -> str:
     chunks = _chunks(content)
     reply_chunks = [*chunks[1:], *(replies or [])]
     if any(len(reply) > MAX_MESSAGE_LENGTH for reply in reply_chunks):
         raise ValueError("A Forum reply exceeds Discord's message limit")
     with httpx.Client(timeout=30) as client:
+        first_payload: dict[str, Any] = {
+            "thread_name": thread_name[:100],
+            "content": chunks[0],
+            "allowed_mentions": {"parse": []},
+        }
+        if suppress_embeds:
+            first_payload["flags"] = SUPPRESS_EMBEDS_FLAG
         first = client.post(
             webhook,
             params={"wait": "true"},
-            json={
-                "thread_name": thread_name[:100],
-                "content": chunks[0],
-                "allowed_mentions": {"parse": []},
-            },
+            json=first_payload,
         )
         _check_discord_response(first)
         response_data = first.json()
@@ -99,10 +126,16 @@ def _post_forum_thread(
             raise ValueError("Discord did not return the Forum thread ID")
 
         for chunk in reply_chunks:
+            reply_payload: dict[str, Any] = {
+                "content": chunk,
+                "allowed_mentions": {"parse": []},
+            }
+            if suppress_embeds:
+                reply_payload["flags"] = SUPPRESS_EMBEDS_FLAG
             response = client.post(
                 webhook,
                 params={"wait": "true", "thread_id": thread_id},
-                json={"content": chunk, "allowed_mentions": {"parse": []}},
+                json=reply_payload,
             )
             _check_discord_response(response)
 
@@ -167,7 +200,9 @@ def post_weekly_report(
     else:
         content = f"{header}\n\n本週沒有符合或待確認的職缺。"
         replies = []
-    return _post_forum_thread(webhook, week_title, content, replies)
+    return _post_forum_thread(
+        webhook, week_title, content, replies, suppress_embeds=True
+    )
 
 
 def post_discord_test(webhook_env: str = "DISCORD_FORUM_WEBHOOK_URL") -> str:

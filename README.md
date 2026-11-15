@@ -10,7 +10,7 @@ Create your private `config/settings.yaml` from `config/settings.example.yaml`, 
 
 The Gmail label defaults to `LinkedIn Job Alerts`. Create a Gmail filter that applies this label to LinkedIn job alert emails. The reader uses Gmail's read-only API scope and does not mark messages as read.
 
-LLM providers are selected with `llm.provider` in `config/settings.yaml`. The default example uses Google AI Studio through the `google-genai` SDK; it needs an API key and model name, but no endpoint URL. The `openai_compatible` provider remains available for services that implement Chat Completions and uses `LLM_OPENAI_COMPATIBLE_URL`. Both providers use the same response validation: extracted fields without evidence found in the supplied source text are displayed as `未提供`.
+LLM providers are selected with `llm.provider` in `config/settings.yaml`. The default example uses Google AI Studio through the `google-genai` SDK; it needs an API key and model name, but no endpoint URL. The `openai_compatible` provider remains available for services that implement Chat Completions and uses `LLM_OPENAI_COMPATIBLE_URL`. Benefits, schedule, and work mode without supporting evidence in the supplied source text are displayed as `未提供`.
 
 ## Run locally with uv
 
@@ -60,7 +60,7 @@ To test the LLM connection while sending only one job, run:
 uv run --env-file .env jsn --test-llm
 ```
 
-This mode ingests new Gmail alerts into the local database, then sends exactly one pending job to the configured LLM. It saves and prints that job's result, then exits without scoring other jobs or posting to Discord. The selected job is the newest pending job, with a job whose LinkedIn description was just fetched preferred. A failed LLM request leaves the job pending so you can retry it. Each invocation makes at most one LLM request. The regular `uv run --env-file .env jsn` command still scores all pending jobs.
+This mode ingests new Gmail alerts into the local database, then sends exactly one pending job to the configured LLM. It saves and prints that job's result, then exits without scoring other jobs or posting to Discord. The selected job is the newest pending job, with a job whose LinkedIn description was just fetched preferred. A failed LLM request leaves the job pending so you can retry it. Invalid JSON or provider errors may trigger retries. The regular `uv run --env-file .env jsn` command still scores all pending jobs.
 
 To test Discord separately, run:
 

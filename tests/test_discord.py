@@ -28,7 +28,7 @@ def test_job_block_marks_missing_details_and_includes_original_link() -> None:
     block = _job_block(job)
 
     assert "未提供" in block
-    assert "<https://www.linkedin.com/jobs/view/123456/>" in block
+    assert "[原始職缺](https://www.linkedin.com/jobs/view/123456/)" in block
 
 
 def test_chunks_preserve_report_content_within_discord_limit() -> None:
