@@ -56,6 +56,22 @@ uv run --env-file .env jsn --test-llm
 
 This mode ingests new Gmail alerts into the local database, then sends exactly one pending job to the configured LLM. It saves and prints that job's result, then exits without scoring other jobs or posting to Discord. The selected job is the newest pending job, with a job whose LinkedIn description was just fetched preferred. A failed LLM request leaves the job pending so you can retry it. Invalid JSON or provider errors may trigger retries. The regular `uv run --env-file .env jsn` command still scores all pending jobs.
 
+To exercise one complete Gmail-to-Discord flow, run:
+
+```sh
+uv run --env-file .env jsn --test-pipeline
+```
+
+This reads one recent email from the configured label, parses its first job card, optionally fetches its public LinkedIn description, evaluates it with the LLM, and posts a real Discord thread titled `【流程測試】`. Only jobs with a `pass` or `review` decision appear in the report; a rejected job produces an empty test report. It uses a temporary SQLite database, so the normal database and processed-message state are unchanged. If no email or job card is found, it exits without calling the LLM or Discord. Each run can create another test thread and consume LLM quota.
+
+To search recent job alerts until a job needs review, run:
+
+```sh
+uv run --env-file .env jsn --test-find-review
+```
+
+This evaluates unique jobs one at a time and posts the first `review` result in a Discord thread titled `【待確認職缺測試】`. It uses a temporary database and leaves the normal processing state unchanged. If no job needs review, it does not post. It can make multiple LLM requests and consume substantial quota.
+
 To test Discord separately, run:
 
 ```sh

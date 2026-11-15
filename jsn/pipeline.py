@@ -4,6 +4,8 @@ import argparse
 import json
 import logging
 import os
+import tempfile
+from contextlib import closing
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -128,6 +130,230 @@ def _enrich_pending_jobs(
             statuses,
         )
     return attempted_keys
+
+
+def run_pipeline_test() -> None:
+    config = load_config()
+    with tempfile.TemporaryDirectory(prefix="jsn-pipeline-test-") as temp_dir:
+        database_path = Path(temp_dir) / "jobs.sqlite3"
+        connection = connect(str(database_path))
+        try:
+            with closing(fetch_unprocessed_messages(config["gmail"], set(), max_messages=1)) as messages:
+                message = next(messages, None)
+            if message is None:
+                raise SystemExit(
+                    "No recent email was found for the configured Gmail label; "
+                    "no LLM request or Discord post was made."
+                )
+
+            candidates = parse_linkedin_alert(message)
+            if not candidates:
+                raise SystemExit(
+                    "The selected email contained no LinkedIn job cards; "
+                    "no LLM request or Discord post was made."
+                )
+
+            candidate = candidates[0]
+            store_job(connection, candidate)
+            store_message(connection, message.message_id, message.internal_date)
+            connection.commit()
+            LOGGER.info(
+                "Pipeline test selected one email and its first job card "
+                "(1 of %d parsed jobs)",
+                len(candidates),
+            )
+
+            now = datetime.now(timezone.utc)
+            max_age = max(1, int(config["database"].get("max_job_age_days", 30)))
+            cutoff = (now - timedelta(days=max_age)).isoformat()
+            config_hash = scoring_config_hash(config)
+            detail_limit = min(
+                1,
+                max(0, int(config.get("job_details", {}).get("max_per_run", 3))),
+            )
+            _enrich_pending_jobs(connection, config, cutoff, detail_limit)
+
+            jobs = pending_scoring(connection, config_hash, cutoff)
+            if not jobs:
+                raise SystemExit(
+                    "The selected job is outside the configured scoring window; "
+                    "no LLM request or Discord post was made."
+                )
+
+            LOGGER.info("Scoring test job 1/1")
+            job = jobs[0]
+            analysis = analyze_job(dict(job), config)
+            save_analysis(connection, str(job["job_key"]), analysis, config_hash)
+            connection.commit()
+
+            report_rows = report_candidates(connection, cutoff)
+            report = [_report_job(dict(row)) for row in report_rows]
+            local_now = datetime.now(TAIPEI)
+            week_key = local_now.strftime("%G-W%V")
+            title_prefix = config["discord"].get("title_prefix", "LinkedIn 職缺週報")
+            title = f"【流程測試】{title_prefix} {week_key} {local_now:%m-%d %H:%M}"
+            thread_id = post_weekly_report(
+                report,
+                title,
+                config["discord"].get("webhook_env", "DISCORD_FORUM_WEBHOOK_URL"),
+            )
+            save_report(
+                connection,
+                week_key,
+                thread_id,
+                [str(row["job_key"]) for row in report],
+                len(report),
+            )
+            LOGGER.info(
+                "Pipeline test posted a marked Discord report with %d eligible jobs",
+                len(report),
+            )
+            print(f"Pipeline test Discord thread created (Forum thread ID: {thread_id})")
+        finally:
+            connection.close()
+
+
+def run_test_find_review() -> None:
+    config = load_config()
+    now = datetime.now(timezone.utc)
+    max_age = max(1, int(config["database"].get("max_job_age_days", 30)))
+    cutoff = (now - timedelta(days=max_age)).isoformat()
+    config_hash = scoring_config_hash(config)
+    detail_limit = min(
+        1,
+        max(0, int(config.get("job_details", {}).get("max_per_run", 3))),
+    )
+    messages_checked = 0
+    jobs_seen = 0
+    jobs_tested = 0
+    seen_job_keys: set[str] = set()
+
+    with tempfile.TemporaryDirectory(prefix="jsn-find-review-test-") as temp_dir:
+        connection = connect(str(Path(temp_dir) / "jobs.sqlite3"))
+        try:
+            messages = fetch_unprocessed_messages(config["gmail"], set())
+            for message in messages:
+                messages_checked += 1
+                candidates = parse_linkedin_alert(message)
+                store_message(connection, message.message_id, message.internal_date)
+                connection.commit()
+
+                for candidate in candidates:
+                    if candidate.job_key in seen_job_keys:
+                        continue
+                    seen_job_keys.add(candidate.job_key)
+                    jobs_seen += 1
+                    store_job(connection, candidate)
+                    connection.commit()
+
+                    _enrich_pending_jobs(connection, config, cutoff, detail_limit)
+                    pending = pending_scoring(connection, config_hash, cutoff)
+                    job = next(
+                        (row for row in pending if row["job_key"] == candidate.job_key),
+                        None,
+                    )
+                    if job is None:
+                        LOGGER.info(
+                            "Skipping test job %d; it is outside the scoring window",
+                            jobs_seen,
+                        )
+                        continue
+
+                    jobs_tested += 1
+                    LOGGER.info("Testing job %d (candidate %d)", jobs_tested, jobs_seen)
+                    try:
+                        analysis = analyze_job(dict(job), config)
+                    except json.JSONDecodeError as error:
+                        LOGGER.warning(
+                            "Skipping job %d after invalid JSON from the LLM "
+                            "at line %d, column %d",
+                            jobs_tested,
+                            error.lineno,
+                            error.colno,
+                        )
+                        continue
+                    save_analysis(
+                        connection,
+                        str(candidate.job_key),
+                        analysis,
+                        config_hash,
+                    )
+                    connection.commit()
+                    LOGGER.info(
+                        "Tested job %d: decision=%s, score=%d",
+                        jobs_tested,
+                        analysis["decision"],
+                        analysis["score"],
+                    )
+
+                    if analysis["decision"] != "review":
+                        continue
+
+                    report_rows = report_candidates(connection, cutoff)
+                    selected_rows = [
+                        row for row in report_rows if row["job_key"] == candidate.job_key
+                    ]
+                    if not selected_rows:
+                        raise RuntimeError(
+                            "A review test job was not available for the Discord report"
+                        )
+
+                    report = [_report_job(dict(row)) for row in selected_rows]
+                    local_now = datetime.now(TAIPEI)
+                    week_key = local_now.strftime("%G-W%V")
+                    title_prefix = config["discord"].get(
+                        "title_prefix", "LinkedIn 職缺週報"
+                    )
+                    title = (
+                        f"【待確認職缺測試】{title_prefix} {week_key} "
+                        f"{local_now:%m-%d %H:%M}"
+                    )
+                    thread_id = post_weekly_report(
+                        report,
+                        title,
+                        config["discord"].get(
+                            "webhook_env", "DISCORD_FORUM_WEBHOOK_URL"
+                        ),
+                    )
+                    save_report(
+                        connection,
+                        week_key,
+                        thread_id,
+                        [str(row["job_key"]) for row in report],
+                        len(report),
+                    )
+                    LOGGER.info(
+                        "Found a review job after testing %d jobs across %d emails",
+                        jobs_tested,
+                        messages_checked,
+                    )
+                    print(
+                        "Review-job test Discord thread created "
+                        f"(Forum thread ID: {thread_id})"
+                    )
+                    return
+
+            if messages_checked == 0:
+                print("No recent email matched the configured Gmail label; no Discord post was made.")
+            elif jobs_seen == 0:
+                print("No LinkedIn job cards were found; no Discord post was made.")
+            elif jobs_tested == 0:
+                print(
+                    "No job cards were within the configured scoring window; "
+                    "no LLM request or Discord post was made."
+                )
+            else:
+                LOGGER.info(
+                    "No review job found after testing %d jobs across %d emails",
+                    jobs_tested,
+                    messages_checked,
+                )
+                print(
+                    f"No review job found after testing {jobs_tested} jobs; "
+                    "no Discord post was made."
+                )
+        finally:
+            connection.close()
 
 
 def run(preview_llm_limit: int | None = None, test_llm: bool = False) -> None:
@@ -283,6 +509,22 @@ def main() -> None:
         help="print up to LIMIT exact LLM input payloads, then exit (default: 3)",
     )
     mode.add_argument(
+        "--test-pipeline",
+        action="store_true",
+        help=(
+            "read one recent Gmail email, process its first job through the LLM, "
+            "and post a marked test report to Discord"
+        ),
+    )
+    mode.add_argument(
+        "--test-find-review",
+        action="store_true",
+        help=(
+            "test recent labeled jobs one by one until one needs review, then "
+            "post that job as a marked Discord report"
+        ),
+    )
+    mode.add_argument(
         "--test-llm",
         action="store_true",
         help="send exactly one pending job to the LLM, save its result, and exit without Discord",
@@ -313,6 +555,12 @@ def main() -> None:
     if args.test_discord is not None:
         thread_id = post_discord_test(args.test_discord)
         print(f"Discord test post created successfully (Forum thread ID: {thread_id})")
+        return
+    if args.test_pipeline:
+        run_pipeline_test()
+        return
+    if args.test_find_review:
+        run_test_find_review()
         return
     if args.test_discord_report is not None:
         run_discord_report_test(args.test_discord_report)
