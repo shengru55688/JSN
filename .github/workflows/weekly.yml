@@ -1,0 +1,113 @@
+name: Weekly job search
+
+on:
+  schedule:
+    # GitHub Actions cron uses UTC; 00:00 UTC is 08:00 in Taiwan.
+    - cron: "0 0 * * 1"
+  workflow_dispatch:
+
+concurrency:
+  group: weekly-job-search
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  collect-and-notify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        id: checkout
+        uses: actions/checkout@v4
+
+      - name: Restore private job-search settings
+        env:
+          JSN_SETTINGS_YAML: ${{ secrets.JSN_SETTINGS_YAML }}
+        run: |
+          if [ -z "${JSN_SETTINGS_YAML:-}" ]; then
+            echo "Missing repository secret JSN_SETTINGS_YAML" >&2
+            exit 1
+          fi
+          printf '%s' "$JSN_SETTINGS_YAML" > config/settings.yaml
+          chmod 600 config/settings.yaml
+
+      - name: Restore SQLite state from Cloudflare R2
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          R2_ACCOUNT_ID: ${{ vars.R2_ACCOUNT_ID }}
+          R2_BUCKET_NAME: ${{ vars.R2_BUCKET_NAME }}
+          R2_OBJECT_KEY: ${{ vars.R2_OBJECT_KEY }}
+        run: |
+          : "${R2_ACCOUNT_ID:?Missing repository variable R2_ACCOUNT_ID}"
+          : "${R2_BUCKET_NAME:?Missing repository variable R2_BUCKET_NAME}"
+          : "${R2_OBJECT_KEY:?Missing repository variable R2_OBJECT_KEY}"
+          : "${AWS_ACCESS_KEY_ID:?Missing secret R2_ACCESS_KEY_ID}"
+          : "${AWS_SECRET_ACCESS_KEY:?Missing secret R2_SECRET_ACCESS_KEY}"
+          mkdir -p /tmp/jsn
+          endpoint="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
+          error_file="${RUNNER_TEMP}/r2-head-object.err"
+          if aws s3api head-object \
+            --bucket "$R2_BUCKET_NAME" \
+            --key "$R2_OBJECT_KEY" \
+            --endpoint-url "$endpoint" \
+            >/dev/null 2>"$error_file"; then
+            aws s3 cp \
+              "s3://${R2_BUCKET_NAME}/${R2_OBJECT_KEY}" \
+              /tmp/jsn/jobs.sqlite3 \
+              --endpoint-url "$endpoint" \
+              --only-show-errors
+          elif grep -Eq '404|Not Found|NoSuchKey' "$error_file"; then
+            echo "No previous SQLite state found in R2; starting with an empty database."
+          else
+            cat "$error_file" >&2
+            exit 1
+          fi
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Install dependencies
+        run: uv sync --locked --no-dev
+
+      - name: Collect, filter, and notify
+        env:
+          GMAIL_CLIENT_ID: ${{ secrets.GMAIL_CLIENT_ID }}
+          GMAIL_CLIENT_SECRET: ${{ secrets.GMAIL_CLIENT_SECRET }}
+          GMAIL_REFRESH_TOKEN: ${{ secrets.GMAIL_REFRESH_TOKEN }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_MODEL: ${{ vars.LLM_MODEL }}
+          LLM_OPENAI_COMPATIBLE_URL: ${{ vars.LLM_OPENAI_COMPATIBLE_URL }}
+          # Retain this name for private settings files created before provider selection was added.
+          LLM_CHAT_COMPLETIONS_URL: ${{ vars.LLM_CHAT_COMPLETIONS_URL }}
+          DISCORD_FORUM_WEBHOOK_URL: ${{ secrets.DISCORD_FORUM_WEBHOOK_URL }}
+        run: uv run --locked --no-sync jsn
+
+      - name: Persist SQLite state to Cloudflare R2
+        if: always() && steps.checkout.outcome == 'success'
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          R2_ACCOUNT_ID: ${{ vars.R2_ACCOUNT_ID }}
+          R2_BUCKET_NAME: ${{ vars.R2_BUCKET_NAME }}
+          R2_OBJECT_KEY: ${{ vars.R2_OBJECT_KEY }}
+        run: |
+          if [ -f /tmp/jsn/jobs.sqlite3 ]; then
+            endpoint="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
+            aws s3 cp \
+              /tmp/jsn/jobs.sqlite3 \
+              "s3://${R2_BUCKET_NAME}/${R2_OBJECT_KEY}" \
+              --endpoint-url "$endpoint" \
+              --only-show-errors
+          fi

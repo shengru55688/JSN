@@ -1,0 +1,40 @@
+gmail:
+  label_name: "LinkedIn Job Alerts"
+  lookback_days: 30
+  max_results_per_page: 100
+
+profile:
+  skills: []
+  job_titles: []
+  preferred_locations:
+    - "Taiwan"
+  normal_schedule: "weekday daytime"
+  preferred_work_modes: []
+
+filters:
+  minimum_score: 60
+  require_taiwan_location: true
+  require_normal_schedule: true
+  work_mode_required: false
+
+job_details:
+  max_per_run: 3
+  timeout_seconds: 20
+  retry_after_days: 7
+
+llm:
+  provider: "google_ai_studio"
+  api_key_env: "LLM_API_KEY"
+  model_env: "LLM_MODEL"
+  timeout_seconds: 60
+  min_request_interval_seconds: 5
+  openai_compatible:
+    endpoint_env: "LLM_OPENAI_COMPATIBLE_URL"
+
+discord:
+  webhook_env: "DISCORD_FORUM_WEBHOOK_URL"
+  title_prefix: "LinkedIn 職缺週報"
+
+database:
+  path: "data/jobs.sqlite3"
+  max_job_age_days: 30
