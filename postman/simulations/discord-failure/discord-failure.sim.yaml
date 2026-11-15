@@ -1,0 +1,6 @@
+simulation: discord-failure
+routing: path
+mocks:
+  - name: discord-webhook
+    routeKey: discord
+    path: postman/mocks/discord-webhook

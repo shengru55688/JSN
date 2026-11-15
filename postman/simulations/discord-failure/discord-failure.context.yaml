@@ -1,0 +1,23 @@
+purpose:
+  stands_in_for: Discord incoming webhooks
+  unblocks: Local testing of the weekly job failure notification without sending a Discord message.
+assumptions:
+  - id: discord-webhook-contract
+    status: unknown
+    claim: A Discord text-channel webhook accepts a JSON POST containing content and allowed_mentions and returns a successful status.
+    reason: The stand-in models this behavior; neither a real Discord webhook nor a provider contract was checked.
+    verification: The local simulation returned 204 for the expected payload, but this does not establish real Discord behavior.
+    source: .github/workflows/weekly.yml; postman/mocks/discord-webhook/default.js
+    updated_at: "2026-11-15"
+  - id: failure-notification-local-behavior
+    status: supported
+    claim: The notification command sends the expected payload to the stand-in and fails when the stand-in returns HTTP 500.
+    reason: The workflow command succeeded for the simulated 204 response and exited with curl status 22 for 500.
+    verification: On 2026-11-15, ran the workflow's actual shell command against the local Postman simulation. The simulation log recorded a POST to the success route with status 204 and a POST to the failure route with status 500. The mock validates a run link and empty allowed_mentions.parse.
+    source: .github/workflows/weekly.yml; postman/mocks/discord-webhook/default.js; tests/test_failure_notification.py
+    updated_at: "2026-11-15"
+fingerprints:
+  - id: failure-notification-dirty-tree
+    date: "2026-11-15"
+    commit: ea5dfbb (working tree contains the notification changes and a pre-existing workflow-name edit)
+    cli: Postman CLI 1.77.0
