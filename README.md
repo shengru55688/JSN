@@ -8,7 +8,7 @@ JSN reads LinkedIn alert emails and attempts to fetch public job descriptions. M
 
 Create your private `config/settings.yaml` from `config/settings.example.yaml`, then set the Gmail label, skills, desired job titles, location and schedule requirements, WFH preferences, score threshold, and database retention age. Add at least one skill or job title before running. The personal settings file is ignored by Git; do not replace it with the example after customizing it.
 
-The Gmail label defaults to `LinkedIn Job Alerts`. Create a Gmail filter that applies this label to LinkedIn job alert emails. The reader uses Gmail's read-only API scope and does not mark messages as read.
+The Gmail label defaults to `LinkedIn Job Alerts`. Create a Gmail filter that applies this label to LinkedIn job alert emails, and make sure the label is visible in IMAP in Gmail's label settings. The reader opens the label read-only and does not mark messages as read.
 
 LLM providers are selected with `llm.provider` in `config/settings.yaml`. The default example uses Google AI Studio through the `google-genai` SDK; it needs an API key and model name, but no endpoint URL. The `openai_compatible` provider remains available for services that implement Chat Completions and uses `LLM_OPENAI_COMPATIBLE_URL`. Benefits, schedule, and work mode without supporting evidence in the supplied source text are displayed as `未提供`.
 
@@ -26,17 +26,11 @@ cp config/settings.example.yaml config/settings.yaml
 
 Run the copy commands only for first-time setup so you do not overwrite existing local settings. Edit `config/settings.yaml` with your job-search profile and Gmail label. Add at least one skill or job title. The file is ignored by Git and is not included in the repository.
 
-### 2. Prepare Gmail OAuth and get a refresh token
+### 2. Prepare Gmail IMAP access
 
-In Google Cloud, enable the Gmail API and configure the OAuth consent screen to request the `https://www.googleapis.com/auth/gmail.readonly` scope. If the app is in Testing mode, add the Gmail account you will authorize as a test user. Put your Installed OAuth client's `GMAIL_CLIENT_ID` and `GMAIL_CLIENT_SECRET` in `.env`.
+Enable 2-Step Verification for your Google Account, then create an [app password](https://support.google.com/accounts/answer/185833) for JSN. Put the Gmail address in `GMAIL_ADDRESS` and the app password in `GMAIL_APP_PASSWORD` in `.env`. Use the same account that receives the LinkedIn alerts. Google Workspace administrators or some account security settings can prevent the use of app passwords; check your account settings if the option is unavailable.
 
-Run the helper:
-
-```sh
-uv run --env-file .env jsn-gmail-auth
-```
-
-It opens a Google authorization page in your browser and listens for the local OAuth callback. Sign in to the Gmail account that has the LinkedIn alert label and grant read-only access. The helper saves `GMAIL_REFRESH_TOKEN` into `.env` and does not print the token. If `.env` already contains a refresh token, the helper replaces it with the newly issued token.
+Gmail app passwords allow broad IMAP access to the account, so keep the password private. Google can revoke app passwords after account security changes; create a new one if login stops working. For existing users, the reader preserves Gmail message IDs so previously processed messages in the SQLite database remain deduplicated.
 
 ### 3. Configure the remaining services and run JSN
 
@@ -88,15 +82,13 @@ The workflow runs every Monday at 08:00 Taiwan time and supports manual runs. Gi
 
 Add these repository secrets and variables before enabling the workflow:
 
-- Secrets `GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET`, and `GMAIL_REFRESH_TOKEN` for Gmail API OAuth.
+- Secrets `GMAIL_ADDRESS` and `GMAIL_APP_PASSWORD` for Gmail IMAP.
 - Secret `JSN_SETTINGS_YAML` containing the full YAML content of your private settings; set `database.path` to `/tmp/jsn/jobs.sqlite3` for the Actions runner.
 - Secrets `R2_ACCESS_KEY_ID` and `R2_SECRET_ACCESS_KEY` for an R2 S3 API token with access to the state object.
 - Variables `R2_ACCOUNT_ID`, `R2_BUCKET_NAME`, and `R2_OBJECT_KEY` (for example, `jsn/jobs.sqlite3`).
 - Secret `LLM_API_KEY` and variable `LLM_MODEL` for the selected LLM provider and model. For Google AI Studio, use a Google AI Studio API key and choose `provider: google_ai_studio` in the private settings file.
 - Variable `LLM_OPENAI_COMPATIBLE_URL` only when `llm.provider` is `openai_compatible`.
 - Secret `DISCORD_FORUM_WEBHOOK_URL` for a webhook attached to the Discord Forum channel.
-
-Google OAuth refresh tokens can expire depending on the consent screen publishing status. Keep the OAuth app and token lifecycle in mind for a weekly unattended workflow.
 
 For Google AI Studio, `llm.min_request_interval_seconds` sets the minimum time between request starts. It defaults to 5 seconds (about 12 requests per minute) to stay below a 15 requests-per-minute free-tier limit. A Google `429` response is retried using Google's suggested wait time when available. Both supported providers retry a `503` response once after waiting for `llm.min_request_interval_seconds`. Requests from other apps using the same API key still count toward the same quota.
 
