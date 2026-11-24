@@ -24,7 +24,11 @@ def load_config() -> dict[str, Any]:
 
     for section in ("gmail", "filters", "llm", "discord", "database"):
         if not isinstance(config.get(section), dict):
-            raise ValueError(f"Configuration must define a {section} mapping")
+            raise ValueError(
+                f"Configuration {path} must define a top-level {section} mapping; "
+                "see config/settings.example.yaml. In GitHub Actions, update the "
+                "JSN_SETTINGS_YAML secret."
+            )
     if not isinstance(config.get("job_details", {}), dict):
         raise ValueError("Configuration job_details must be a mapping")
 

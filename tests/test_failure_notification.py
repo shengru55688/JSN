@@ -19,7 +19,7 @@ def test_notification_runs_only_when_weekly_job_fails():
     assert job["needs"] == "collect-and-notify"
     assert "always()" in job["if"]
     assert "needs.collect-and-notify.result == 'failure'" in job["if"]
-    assert job["steps"][0]["env"]["DISCORD_FAILURE_WEBHOOK_URL"] == "${{ secrets.DISCORD_FAILURE_WEBHOOK_URL }}"
+    assert job["steps"][0]["env"]["DISCORD_FORUM_WEBHOOK_URL"] == "${{ secrets.DISCORD_FORUM_WEBHOOK_URL }}"
 
 
 def test_notification_sends_run_link_and_propagates_delivery_error(tmp_path):
@@ -36,7 +36,7 @@ def test_notification_sends_run_link_and_propagates_delivery_error(tmp_path):
         **os.environ,
         "PATH": f"{tmp_path}:{os.environ['PATH']}",
         "CURL_OUTPUT": str(output),
-        "DISCORD_FAILURE_WEBHOOK_URL": "https://example.invalid/webhook-secret",
+        "DISCORD_FORUM_WEBHOOK_URL": "https://example.invalid/webhook-secret",
         "GITHUB_SERVER_URL": "https://github.com",
         "GITHUB_REPOSITORY": "owner/repo",
         "GITHUB_RUN_ID": "123456",
@@ -48,6 +48,8 @@ def test_notification_sends_run_link_and_propagates_delivery_error(tmp_path):
     assert result.returncode == 0
     args = json.loads(output.read_text())
     payload = json.loads(args[args.index("--data") + 1])
+    assert payload["thread_name"] == "⚠️ JSN 執行失敗 #123456"
+    assert args[-1] == env["DISCORD_FORUM_WEBHOOK_URL"]
     assert "Weekly job search failed" in payload["content"]
     assert 'feature/quoted"branch' in payload["content"]
     assert "https://github.com/owner/repo/actions/runs/123456" in payload["content"]
@@ -59,8 +61,8 @@ def test_notification_sends_run_link_and_propagates_delivery_error(tmp_path):
 
 
 def test_notification_reports_missing_webhook_without_posting(tmp_path):
-    env = {**os.environ, "DISCORD_FAILURE_WEBHOOK_URL": ""}
+    env = {**os.environ, "DISCORD_FORUM_WEBHOOK_URL": ""}
     command = _notification_job()["steps"][0]["run"]
     result = subprocess.run(["bash", "-e", "-o", "pipefail", "-c", command], env=env, capture_output=True, text=True)
     assert result.returncode != 0
-    assert "Missing repository secret DISCORD_FAILURE_WEBHOOK_URL" in result.stderr
+    assert "Missing repository secret DISCORD_FORUM_WEBHOOK_URL" in result.stderr

@@ -104,8 +104,17 @@ Add these repository secrets and variables before enabling the workflow:
 - Variables `R2_ACCOUNT_ID`, `R2_BUCKET_NAME`, and `R2_OBJECT_KEY` (for example, `jsn/jobs.sqlite3`).
 - Secret `LLM_API_KEY` and variable `LLM_MODEL` for the selected LLM provider and model. For Google AI Studio, use a Google AI Studio API key and choose `provider: google_ai_studio` in the private settings file.
 - Variable `LLM_OPENAI_COMPATIBLE_URL` only when `llm.provider` is `openai_compatible`.
-- Secret `DISCORD_FORUM_WEBHOOK_URL` for a webhook attached to the Discord Forum channel.
-- Secret `DISCORD_FAILURE_WEBHOOK_URL` for a webhook attached to a Discord text channel. If the weekly job fails, a separate notification job posts the workflow name, branch, and run link to that channel. A failed notification is visible in the Actions run log. Canceled runs and failures that prevent GitHub from starting a runner cannot send a notification.
+- Secret `DISCORD_FORUM_WEBHOOK_URL` for a webhook attached to the Discord Forum channel. If the weekly job fails, a separate notification job creates a post in the same Forum with the workflow name, branch, and run link. A failed notification is visible in the Actions run log. Canceled runs and failures that prevent GitHub from starting a runner cannot send a notification.
+
+If the workflow reports that the configuration must define a `gmail` mapping, update `JSN_SETTINGS_YAML` with the full private settings YAML. It must include a top-level `gmail` section, for example:
+
+```yaml
+gmail:
+  label_name: "LinkedIn Job Alerts"
+  lookback_days: 30
+```
+
+Use your actual Gmail label and retain the other sections and personal settings. Compare the structure with `config/settings.example.yaml`, then rerun the workflow. The Gmail address and app password belong in their separate secrets.
 
 For Google AI Studio, `llm.min_request_interval_seconds` sets the minimum time between request starts. It defaults to 5 seconds (about 12 requests per minute) to stay below a 15 requests-per-minute free-tier limit. A Google `429` response is retried using Google's suggested wait time when available. Both supported providers retry a `503` response once after waiting for `llm.min_request_interval_seconds`. Requests from other apps using the same API key still count toward the same quota.
 

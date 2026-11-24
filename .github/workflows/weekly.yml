@@ -124,18 +124,18 @@ jobs:
     steps:
       - name: Notify Discord of failure
         env:
-          DISCORD_FAILURE_WEBHOOK_URL: ${{ secrets.DISCORD_FAILURE_WEBHOOK_URL }}
+          DISCORD_FORUM_WEBHOOK_URL: ${{ secrets.DISCORD_FORUM_WEBHOOK_URL }}
         run: |
-          if [ -z "${DISCORD_FAILURE_WEBHOOK_URL:-}" ]; then
-            echo "Missing repository secret DISCORD_FAILURE_WEBHOOK_URL" >&2
+          if [ -z "${DISCORD_FORUM_WEBHOOK_URL:-}" ]; then
+            echo "Missing repository secret DISCORD_FORUM_WEBHOOK_URL" >&2
             exit 1
           fi
           payload=$(python3 -c '
           import json, os
           run_url = "{}/{}/actions/runs/{}".format(os.environ["GITHUB_SERVER_URL"], os.environ["GITHUB_REPOSITORY"], os.environ["GITHUB_RUN_ID"])
           content = "⚠️ {} failed.\nBranch: {}\nRun: {}".format(os.environ["GITHUB_WORKFLOW"], os.environ["GITHUB_REF_NAME"], run_url)
-          print(json.dumps({"content": content, "allowed_mentions": {"parse": []}}))
+          print(json.dumps({"thread_name": "⚠️ JSN 執行失敗 #{}".format(os.environ["GITHUB_RUN_ID"]), "content": content, "allowed_mentions": {"parse": []}}))
           ')
           curl --fail --silent --show-error --connect-timeout 5 --max-time 15 \
             --header 'Content-Type: application/json' \
-            --data "$payload" "$DISCORD_FAILURE_WEBHOOK_URL" > /dev/null
+            --data "$payload" "$DISCORD_FORUM_WEBHOOK_URL" > /dev/null
